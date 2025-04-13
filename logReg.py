@@ -83,4 +83,4 @@ with torch.no_grad():
     y_pred_class = (y_pred > 0.5).float()
 
     accuracy = (y_pred_class == y).float().mean()
-    print(f'Accuracy: {accuracy.item():.4f}') 
+    print(f'Accuracy: {accuracy.item():.4f}') # 85.09
