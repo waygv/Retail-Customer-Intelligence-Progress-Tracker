@@ -84,3 +84,12 @@ with torch.no_grad():
 
     accuracy = (y_pred_class == y).float().mean()
     print(f'Accuracy: {accuracy.item():.4f}') # 85.09
+
+
+with torch.no_grad():
+    model.eval()
+    y_pred_test = model(torch.tensor(X_test.values, dtype=torch.float32))  # Use X_test
+    y_pred_class_test = (y_pred_test > 0.5).float()
+
+    accuracy_test = (y_pred_class_test == torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)).float().mean()
+    print(f'Test Accuracy: {accuracy_test.item():.4f}') # 70.04
