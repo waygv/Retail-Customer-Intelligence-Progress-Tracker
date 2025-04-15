@@ -4,22 +4,41 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
 df = pd.read_csv("/kaggle/working/cleaned_customer_data.csv")
 
 threshold = df["MntWines"].quantile(0.75)
 df["HighSpender"] = (df["MntWines"] > threshold).astype(int)
+
 df.drop(columns=["ID", "Dt_Customer", "MntWines"], inplace=True)
 
-X = df.drop("HighSpender", axis=1)
+df = pd.get_dummies(df, drop_first=True)
+
+df = df.apply(pd.to_numeric, errors='coerce')
+df.fillna(df.mean(numeric_only=True), inplace=True)
+
+X = df.drop(columns=["HighSpender"])
 y = df["HighSpender"]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-X_train = X_train.astype({col: 'int' for col in X_train.select_dtypes(include='bool').columns})
-X_test = X_test.astype({col: 'int' for col in X_test.select_dtypes(include='bool').columns})
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y.values, test_size=0.2, random_state=42)
+
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
+
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+
+train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+
+val_dataset = TensorDataset(X_test_tensor, y_test_tensor)
+val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
 class LogisticRegressionModel(nn.Module):
     def __init__(self, input_dim):
@@ -27,29 +46,14 @@ class LogisticRegressionModel(nn.Module):
         self.linear = nn.Linear(input_dim, 1)
 
     def forward(self, x):
-        return torch.sigmoid(self.linear(x))
+        return self.linear(x)
 
-df = pd.get_dummies(df, drop_first=True)
-df = df.apply(pd.to_numeric, errors='coerce')
-df.fillna(df.mean(), inplace=True)
+input_dim = X_train_tensor.shape[1]
+model = LogisticRegressionModel(input_dim)
 
-X = torch.tensor(df.drop(columns=['Response']).values, dtype=torch.float32)
-y = torch.tensor(df['Response'].values, dtype=torch.float32).view(-1, 1)
-
-dataset = TensorDataset(X, y)
-train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
-
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-
-train_dataset = TensorDataset(X_train, y_train)
-val_dataset = TensorDataset(X_val, y_val)
-
-train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
-
-model = LogisticRegressionModel(input_dim=X_train.shape[1])
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# Loss and Optimizer (add weight decay for regularization)
 criterion = nn.BCEWithLogitsLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
 epochs = 50
 for epoch in range(epochs):
@@ -65,6 +69,7 @@ for epoch in range(epochs):
 
     avg_train_loss = running_loss / len(train_loader)
 
+    # Validation
     model.eval()
     val_loss = 0.0
     with torch.no_grad():
@@ -72,24 +77,17 @@ for epoch in range(epochs):
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             val_loss += loss.item()
-
     avg_val_loss = val_loss / len(val_loader)
     
-    print(f"Epoch [{epoch+1}/{epochs}], Training Loss: {avg_train_loss:.4f}, Validation Loss: {avg_val_loss:.4f}")
+    print(f"Epoch [{epoch+1}/{epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
 
+# Evaluate on test set
+model.eval()
 with torch.no_grad():
-    model.eval()
-    y_pred = model(X)
-    y_pred_class = (y_pred > 0.5).float()
-
-    accuracy = (y_pred_class == y).float().mean()
-    print(f'Accuracy: {accuracy.item():.4f}') # 85.09
-
-
-with torch.no_grad():
-    model.eval()
-    y_pred_test = model(torch.tensor(X_test.values, dtype=torch.float32))  # Use X_test
-    y_pred_class_test = (y_pred_test > 0.5).float()
-
-    accuracy_test = (y_pred_class_test == torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)).float().mean()
-    print(f'Test Accuracy: {accuracy_test.item():.4f}') # 70.04
+    y_pred_test_logits = model(X_test_tensor)
+    y_pred_test_probs = torch.sigmoid(y_pred_test_logits)
+    y_pred_test_classes = (y_pred_test_probs > 0.5).float()
+    
+    acc = accuracy_score(y_test, y_pred_test_classes.numpy())
+    print(f"Test Accuracy: {acc * 100:.2f}%")
+    print(classification_report(y_test, y_pred_test_classes.numpy()))
