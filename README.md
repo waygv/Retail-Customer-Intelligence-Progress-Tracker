@@ -1,4 +1,4 @@
-Customer Personality Analysis
+# Customer Personality Analysis
 A machine learning project analyzing customer behavior for segmentation, spend prediction, churn risk, and income estimation.
 
 Dataset: Kaggle - Customer Personality Analysis
